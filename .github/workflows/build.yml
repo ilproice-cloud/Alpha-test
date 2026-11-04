@@ -1,4 +1,3 @@
-
 name: Build RealmForge Compile Fix
 
 on:
@@ -24,49 +23,43 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-
-      - name: Find and extract new RealmForge ZIP
-        shell: bash
-        run: |
-          ZIP_FILE="$(find . -type f \
-            -name 'RealmForge_Electro_Visual_Integration_compilefix.zip' \
-            -print -quit)"
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "::error::New RealmForge ZIP not found!"
-            exit 1
-          fi
-
-          mkdir -p extracted
-          unzip -q -o "$ZIP_FILE" -d extracted
+          cache: gradle
 
       - name: Locate Gradle project
         shell: bash
         run: |
-          BUILD_FILE="$(find extracted -type f \
+          BUILD_FILE="$(find . -type f \
             \( -name build.gradle -o -name build.gradle.kts \) \
+            -not -path '*/.gradle/*' \
             -print -quit)"
 
           if [ -z "$BUILD_FILE" ]; then
-            echo "::error::Gradle build file not found!"
+            echo "::error::RealmForge Gradle project not found!"
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$BUILD_FILE")"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Install Gradle 8.8
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.8'
+          echo "Found project: $PROJECT_DIR"
 
-      - name: Compile RealmForge
-        run: gradle --no-daemon -p "$PROJECT_DIR" clean build
+      - name: Build RealmForge
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+            ./gradlew --no-daemon clean build
+          else
+            echo "::error::Gradle wrapper not found. Add gradlew to the repository."
+            exit 1
+          fi
 
       - name: Upload RealmForge JAR
         uses: actions/upload-artifact@v4
         with:
-          name: RealmForge-Electro-Visual-Integration-1.21.1
+          name: RealmForge-1.21.1
           path: |
             ${{ env.PROJECT_DIR }}/build/libs/*.jar
             !${{ env.PROJECT_DIR }}/build/libs/*-sources.jar
