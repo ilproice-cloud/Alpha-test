@@ -1,0 +1,74 @@
+
+name: Build RealmForge Compile Fix
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build RealmForge
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Find and extract new RealmForge ZIP
+        shell: bash
+        run: |
+          ZIP_FILE="$(find . -type f \
+            -name 'RealmForge_Electro_Visual_Integration_compilefix.zip' \
+            -print -quit)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "::error::New RealmForge ZIP not found!"
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q -o "$ZIP_FILE" -d extracted
+
+      - name: Locate Gradle project
+        shell: bash
+        run: |
+          BUILD_FILE="$(find extracted -type f \
+            \( -name build.gradle -o -name build.gradle.kts \) \
+            -print -quit)"
+
+          if [ -z "$BUILD_FILE" ]; then
+            echo "::error::Gradle build file not found!"
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$BUILD_FILE")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Install Gradle 8.8
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
+
+      - name: Compile RealmForge
+        run: gradle --no-daemon -p "$PROJECT_DIR" clean build
+
+      - name: Upload RealmForge JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealmForge-Electro-Visual-Integration-1.21.1
+          path: |
+            ${{ env.PROJECT_DIR }}/build/libs/*.jar
+            !${{ env.PROJECT_DIR }}/build/libs/*-sources.jar
+          if-no-files-found: error
+          retention-days: 14
