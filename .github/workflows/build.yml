@@ -1,4 +1,4 @@
-name: Build RealmForge Compile Fix
+name: Build RealmForge Electro Visual Integration
 
 on:
   workflow_dispatch:
@@ -23,18 +23,34 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
+
+      - name: Find and extract RealmForge ZIP
+        shell: bash
+        run: |
+          ZIP_FILE="$(find . -type f \
+            -name 'RealmForge-Electro-Visual-Integration-1.21.1.zip' \
+            -print -quit)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "::error::RealmForge ZIP not found in repository!"
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q -o "$ZIP_FILE" -d extracted
+
+          echo "ZIP extracted successfully."
 
       - name: Locate Gradle project
         shell: bash
         run: |
-          BUILD_FILE="$(find . -type f \
+          BUILD_FILE="$(find extracted -type f \
             \( -name build.gradle -o -name build.gradle.kts \) \
             -not -path '*/.gradle/*' \
             -print -quit)"
 
           if [ -z "$BUILD_FILE" ]; then
-            echo "::error::RealmForge Gradle project not found!"
+            echo "::error::Gradle build file not found!"
             exit 1
           fi
 
@@ -43,23 +59,39 @@ jobs:
 
           echo "Found project: $PROJECT_DIR"
 
-      - name: Build RealmForge
+      - name: Install Gradle 8.8
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
+
+      - name: Compile RealmForge
         shell: bash
         run: |
-          cd "$PROJECT_DIR"
+          gradle --no-daemon \
+            -p "$PROJECT_DIR" \
+            clean build
 
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew --no-daemon clean build
-          else
-            echo "::error::Gradle wrapper not found. Add gradlew to the repository."
+      - name: Verify JAR
+        shell: bash
+        run: |
+          find "$PROJECT_DIR/build/libs" \
+            -maxdepth 1 \
+            -type f \
+            -name '*.jar' \
+            ! -name '*-sources.jar' \
+            -print
+
+          if ! find "$PROJECT_DIR/build/libs" \
+            -maxdepth 1 -type f -name '*.jar' \
+            ! -name '*-sources.jar' | grep -q .; then
+            echo "::error::No JAR was generated!"
             exit 1
           fi
 
       - name: Upload RealmForge JAR
         uses: actions/upload-artifact@v4
         with:
-          name: RealmForge-1.21.1
+          name: RealmForge-Electro-Visual-Integration-1.21.1
           path: |
             ${{ env.PROJECT_DIR }}/build/libs/*.jar
             !${{ env.PROJECT_DIR }}/build/libs/*-sources.jar
