@@ -1,4 +1,3 @@
-
 name: Build RealmForge Electro Visual Integration
 
 on:
@@ -30,6 +29,26 @@ jobs:
           gradle-version: '8.8'
           cache-disabled: true
 
+      - name: Extract RealmForge source ZIP
+        shell: bash
+        run: |
+          ZIP="RealmForge-Electro-Visual-Integration-1.21.1.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: Source ZIP not found!"
+            ls -la
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q "$ZIP" -d extracted
+
+          echo "ZIP extracted successfully."
+          echo "Searching for Gradle project..."
+
+          find extracted -type f \
+            \( -name build.gradle -o -name build.gradle.kts \)
+
       - name: Find Gradle project
         id: project
         shell: bash
@@ -40,20 +59,22 @@ jobs:
             | head -n 1)
 
           if [ -z "$FILE" ]; then
-            echo "ERROR: No build.gradle found!"
-            echo "Your repository may not contain the extracted project."
+            echo "ERROR: No build.gradle found after extraction!"
             echo "Repository files:"
-            find . -maxdepth 4 -type f | head -200
+            find . -maxdepth 5 -type f | head -200
             exit 1
           fi
 
           DIR=$(dirname "$FILE")
           echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
           echo "Found Gradle project: $DIR"
 
       - name: Build RealmForge
         working-directory: ${{ steps.project.outputs.dir }}
-        run: gradle clean build --no-daemon
+        shell: bash
+        run: |
+          gradle clean build --no-daemon
 
       - name: Upload JAR
         uses: actions/upload-artifact@v4
