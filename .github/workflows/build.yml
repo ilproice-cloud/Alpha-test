@@ -1,100 +1,57 @@
 
-name: Build RealmForge Electro Visual Integration
+@echo off
+title RealmForge Electro Visual Integration - Build
+color 0B
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+echo ==========================================
+echo  RealmForge Electro Visual Integration
+echo ==========================================
+echo.
 
-permissions:
-  contents: read
+where java >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: Java is not installed or not in PATH.
+    echo Install JDK 21 first.
+    pause
+    exit /b 1
+)
 
-jobs:
-  build:
-    name: Build RealmForge
-    runs-on: ubuntu-latest
+java -version
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+if not exist "gradlew.bat" (
+    echo ERROR: gradlew.bat was not found.
+    echo Extract this script into the project root folder.
+    pause
+    exit /b 1
+)
 
-      - name: Set up Java 21
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
+echo.
+echo Cleaning old build...
+call gradlew.bat clean
 
-      - name: Find and extract RealmForge ZIP
-        shell: bash
-        run: |
-          ZIP_FILE="$(find . -type f \
-            -name 'RealmForge-Electro-Visual-Integration-1.21.1.zip' \
-            -print -quit)"
+if errorlevel 1 goto failed
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "::error::RealmForge ZIP not found in repository!"
-            exit 1
-          fi
+echo.
+echo Building RealmForge...
+call gradlew.bat build
 
-          mkdir -p extracted
-          unzip -q -o "$ZIP_FILE" -d extracted
+if errorlevel 1 goto failed
 
-          echo "ZIP extracted successfully."
+echo.
+echo ==========================================
+echo BUILD SUCCESSFUL!
+echo ==========================================
+echo.
+echo Check the build\libs folder for the JAR.
+explorer "build\libs"
+pause
+exit /b 0
 
-      - name: Locate Gradle project
-        shell: bash
-        run: |
-          BUILD_FILE="$(find extracted -type f \
-            \( -name build.gradle -o -name build.gradle.kts \) \
-            -not -path '*/.gradle/*' \
-            -print -quit)"
-
-          if [ -z "$BUILD_FILE" ]; then
-            echo "::error::Gradle build file not found!"
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "$BUILD_FILE")"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Found project: $PROJECT_DIR"
-
-      - name: Install Gradle 8.8
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.8'
-
-      - name: Compile RealmForge
-        shell: bash
-        run: |
-          gradle --no-daemon \
-            -p "$PROJECT_DIR" \
-            clean build
-
-      - name: Verify JAR
-        shell: bash
-        run: |
-          find "$PROJECT_DIR/build/libs" \
-            -maxdepth 1 \
-            -type f \
-            -name '*.jar' \
-            ! -name '*-sources.jar' \
-            -print
-
-          if ! find "$PROJECT_DIR/build/libs" \
-            -maxdepth 1 -type f -name '*.jar' \
-            ! -name '*-sources.jar' | grep -q .; then
-            echo "::error::No JAR was generated!"
-            exit 1
-          fi
-
-      - name: Upload RealmForge JAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: RealmForge-Electro-Visual-Integration-1.21.1
-          path: |
-            ${{ env.PROJECT_DIR }}/build/libs/*.jar
-            !${{ env.PROJECT_DIR }}/build/libs/*-sources.jar
-          if-no-files-found: error
-          retention-days: 14
+:failed
+echo.
+echo ==========================================
+echo BUILD FAILED!
+echo Check the errors above.
+echo ==========================================
+pause
+exit /b 1
