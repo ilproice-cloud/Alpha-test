@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          ZIP="RealmForge-Merged-Build-Ready-compilefix.zip"
+          ZIP="RealmForge-Merged-Build-Ready-compilefix2.zip"
 
           if [ ! -f "$ZIP" ]; then
             echo "ERROR: $ZIP not found!"
