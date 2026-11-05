@@ -1,57 +1,57 @@
 
-@echo off
-title RealmForge Electro Visual Integration - Build
-color 0B
+name: Build RealmForge Electro Visual Integration
 
-echo ==========================================
-echo  RealmForge Electro Visual Integration
-echo ==========================================
-echo.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
-where java >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: Java is not installed or not in PATH.
-    echo Install JDK 21 first.
-    pause
-    exit /b 1
-)
+permissions:
+  contents: read
 
-java -version
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-if not exist "gradlew.bat" (
-    echo ERROR: gradlew.bat was not found.
-    echo Extract this script into the project root folder.
-    pause
-    exit /b 1
-)
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
 
-echo.
-echo Cleaning old build...
-call gradlew.bat clean
+      - name: Install Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
 
-if errorlevel 1 goto failed
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
 
-echo.
-echo Building RealmForge...
-call gradlew.bat build
+      - name: Find project folder
+        id: project
+        shell: bash
+        run: |
+          if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f "realmforge-neoforge/build.gradle" ] || [ -f "realmforge-neoforge/build.gradle.kts" ]; then
+            echo "dir=realmforge-neoforge" >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: build.gradle not found!"
+            exit 1
+          fi
 
-if errorlevel 1 goto failed
+      - name: Build mod
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: gradle clean build --no-daemon
 
-echo.
-echo ==========================================
-echo BUILD SUCCESSFUL!
-echo ==========================================
-echo.
-echo Check the build\libs folder for the JAR.
-explorer "build\libs"
-pause
-exit /b 0
-
-:failed
-echo.
-echo ==========================================
-echo BUILD FAILED!
-echo Check the errors above.
-echo ==========================================
-pause
-exit /b 1
+      - name: Upload compiled JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealmForge-Electro-Visual-Integration-1.21.1
+          path: |
+            ${{ steps.project.outputs.dir }}/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 14
