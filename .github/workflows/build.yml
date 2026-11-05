@@ -1,9 +1,11 @@
-name: Build RealmForge Compile Fix
+name: Full RealmForge Build 1.21.1
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
@@ -11,18 +13,19 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: Download repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 21
+      - name: Install Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Extract compile-fix ZIP
+      - name: Extract complete RealmForge source
         shell: bash
         run: |
           set -euo pipefail
@@ -30,17 +33,19 @@ jobs:
           ZIP="RealmForge-Merged-Build-Ready-compilefix3.zip"
 
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: $ZIP not found!"
-            ls -la
+            echo "ERROR: Full source ZIP is missing!"
+            ls -lah
             exit 1
           fi
 
           mkdir -p extracted
           unzip -oq "$ZIP" -d extracted
 
-          echo "ZIP extracted successfully."
+          echo "Source extracted."
+          echo "Project files:"
+          ls -lah extracted
 
-      - name: Find Gradle project
+      - name: Locate project
         id: project
         shell: bash
         run: |
@@ -49,31 +54,71 @@ jobs:
           FILE=$(find extracted -type f \
             -name build.gradle \
             -not -path '*/.gradle/*' \
-            | head -n 1)
+            -print -quit)
 
           if [ -z "$FILE" ]; then
-            echo "ERROR: No build.gradle found!"
-            find extracted -maxdepth 5 -type f | head -100
+            echo "ERROR: build.gradle not found!"
             exit 1
           fi
 
           DIR=$(dirname "$FILE")
+
+          if [ ! -f "$DIR/gradlew" ]; then
+            echo "ERROR: Gradle wrapper missing!"
+            exit 1
+          fi
+
           echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Project directory: $DIR"
 
-          echo "Found Gradle project: $DIR"
+      - name: Verify Java and Gradle
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          java -version
+          sed -i 's/\r$//' gradlew
+          chmod +x gradlew
+          ./gradlew --version
 
-      - name: Build RealmForge
+      - name: Compile all Java source files
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          ./gradlew compileJava --no-daemon --stacktrace
+
+      - name: Process mod resources
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          ./gradlew processResources --no-daemon
+
+      - name: Build complete mod
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          ./gradlew clean build --no-daemon --stacktrace
+
+      - name: Verify generated JAR
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x gradlew
-          ./gradlew clean build --no-daemon
 
-      - name: Upload RealmForge JAR
+          echo "Generated mod files:"
+          find build/libs -maxdepth 1 -type f -name '*.jar' -ls
+
+          JAR=$(find build/libs -maxdepth 1 \
+            -type f -name '*.jar' \
+            ! -name '*-sources.jar' \
+            | head -n 1)
+
+          if [ -z "$JAR" ]; then
+            echo "ERROR: No mod JAR was generated!"
+            exit 1
+          fi
+
+          echo "Mod JAR successfully generated: $JAR"
+
+      - name: Upload complete compiled mod
         uses: actions/upload-artifact@v4
         with:
-          name: RealmForge-CompileFix-1.21.1
+          name: RealmForge-Full-Mod-1.21.1
           path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
           if-no-files-found: error
           retention-days: 14
