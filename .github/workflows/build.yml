@@ -1,4 +1,4 @@
-name: Build RealmForge Electro Visual Integration
+name: Build RealmForge Compile Fix
 
 on:
   workflow_dispatch:
@@ -22,64 +22,58 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Extract project ZIP if needed
+      - name: Extract compile-fix ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="RealmForge-Merged-Build-Ready-compilefix.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP not found!"
+            ls -la
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -oq "$ZIP" -d extracted
+
+          echo "ZIP extracted successfully."
+
+      - name: Find Gradle project
         id: project
         shell: bash
         run: |
           set -euo pipefail
 
-          if find . -path './.git' -prune -o -type f -name build.gradle -print | grep -q .; then
-            BG=$(find . -path './.git' -prune -o -type f -name build.gradle -print | head -n 1)
-            DIR=$(dirname "$BG")
-          else
-            ZIP=$(find . -maxdepth 2 -type f -iname 'RealmForge-Merged-Build-Ready.zip' -print -quit)
+          FILE=$(find extracted -type f \
+            -name build.gradle \
+            -not -path '*/.gradle/*' \
+            | head -n 1)
 
-            if [ -z "$ZIP" ]; then
-              ZIP=$(find . -maxdepth 2 -type f -iname '*.zip' -print -quit)
-            fi
-
-            if [ -z "$ZIP" ]; then
-              echo 'ERROR: No Gradle project or source ZIP found.'
-              exit 1
-            fi
-
-            mkdir -p extracted
-            unzip -oq "$ZIP" -d extracted
-
-            BG=$(find extracted -type f -name build.gradle -print -quit)
-
-            if [ -z "$BG" ]; then
-              echo 'ERROR: ZIP extracted but build.gradle was not found.'
-              find extracted -maxdepth 4 -type f | head -100
-              exit 1
-            fi
-
-            DIR=$(dirname "$BG")
+          if [ -z "$FILE" ]; then
+            echo "ERROR: No build.gradle found!"
+            find extracted -maxdepth 5 -type f | head -100
+            exit 1
           fi
 
+          DIR=$(dirname "$FILE")
           echo "dir=$DIR" >> "$GITHUB_OUTPUT"
-          echo "Gradle project: $DIR"
 
-      - name: Build RealmForge with Gradle wrapper
+          echo "Found Gradle project: $DIR"
+
+      - name: Build RealmForge
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
           set -euo pipefail
-
-          if [ ! -f gradlew ]; then
-            echo 'ERROR: Gradle wrapper (gradlew) is missing.'
-            exit 1
-          fi
-
-          sed -i 's/\r$//' gradlew
           chmod +x gradlew
-
           ./gradlew clean build --no-daemon
 
-      - name: Upload mod JAR
+      - name: Upload RealmForge JAR
         uses: actions/upload-artifact@v4
         with:
-          name: RealmForge-Merged-1.21.1
+          name: RealmForge-CompileFix-1.21.1
           path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
           if-no-files-found: error
           retention-days: 14
