@@ -98,4 +98,3 @@ jobs:
           name: RealmForge-1.21.1
           path: ${{ steps.project.outputs.project_dir }}/build/libs/*.jar
           if-no-files-found: error
-N
