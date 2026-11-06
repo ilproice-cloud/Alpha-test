@@ -23,10 +23,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
 
       - name: Extract RealmForge source
         shell: bash
@@ -37,6 +33,7 @@ jobs:
 
           if [ ! -f "$ZIP_FILE" ]; then
             echo "ERROR: Source ZIP not found: $ZIP_FILE"
+            echo "Repository contents:"
             ls -la
             exit 1
           fi
@@ -51,7 +48,8 @@ jobs:
           fi
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: No Gradle project found."
+            echo "ERROR: No Gradle project found inside the ZIP."
+            find "$RUNNER_TEMP/realmforge-source" -maxdepth 5 -type f
             exit 1
           fi
 
@@ -66,10 +64,11 @@ jobs:
           mkdir -p "$PROJECT_DIR/libs"
 
           if [ -d "$GITHUB_WORKSPACE/libs" ]; then
-            find "$GITHUB_WORKSPACE/libs" -maxdepth 1 -name '*.jar' -exec cp -f {} "$PROJECT_DIR/libs/" \;
+            find "$GITHUB_WORKSPACE/libs" -maxdepth 1 -type f -name '*.jar' \
+              -exec cp -f {} "$PROJECT_DIR/libs/" \;
           fi
 
-          echo "Project libraries:"
+          echo "Libraries available:"
           ls -lh "$PROJECT_DIR/libs"
 
       - name: Apply compatibility fixes
@@ -93,7 +92,7 @@ jobs:
                 sed -i '/^package .*;/a import net.minecraft.ChatFormatting;' "$JAVA_FILE"
               fi
 
-              echo "Checked $JAVA_FILE"
+              echo "Checked: $JAVA_FILE"
             done < <(find "$JAVA_DIR" -name "$FILE" -print0)
           done
 
@@ -103,26 +102,33 @@ jobs:
               -e 's/getEntityModelSet()/getEntityModels()/g' \
               "$JAVA_FILE"
 
-            echo "Checked $JAVA_FILE"
+            echo "Checked: $JAVA_FILE"
           done < <(find "$JAVA_DIR" -name 'KillerArmorClient.java' -print0)
 
-      - name: Make Gradle wrapper executable
+      - name: Check Gradle wrapper
         shell: bash
         run: |
           set -euo pipefail
 
           if [ ! -f "$PROJECT_DIR/gradlew" ]; then
-            echo "ERROR: gradlew not found."
+            echo "ERROR: gradlew is missing from the extracted project."
             ls -la "$PROJECT_DIR"
             exit 1
           fi
 
           chmod +x "$PROJECT_DIR/gradlew"
 
+          if [ ! -f "$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties" ]; then
+            echo "ERROR: Gradle wrapper properties are missing."
+            exit 1
+          fi
+
       - name: Build RealmForge
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
-        run: ./gradlew build --no-daemon --stacktrace
+        run: |
+          set -euo pipefail
+          ./gradlew build --no-daemon --stacktrace
 
       - name: Upload compiled mod
         uses: actions/upload-artifact@v4
