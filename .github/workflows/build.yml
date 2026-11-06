@@ -28,9 +28,6 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install unzip
-        run: sudo apt-get update && sudo apt-get install -y unzip
-
       - name: Extract RealmForge source
         shell: bash
         run: |
@@ -39,8 +36,7 @@ jobs:
           ZIP_FILE="RealmForge-PrimePiece-Skill-Test-Update.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: $ZIP_FILE was not found in the repository."
-            echo "Repository files:"
+            echo "ERROR: Source ZIP not found: $ZIP_FILE"
             ls -la
             exit 1
           fi
@@ -55,15 +51,14 @@ jobs:
           fi
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Could not find a Gradle project in the ZIP."
-            find "$RUNNER_TEMP/realmforge-source" -maxdepth 4 -type f
+            echo "ERROR: No Gradle project found."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Found project: $PROJECT_DIR"
 
-      - name: Copy required libraries
+      - name: Copy Photon and LDLib libraries
         shell: bash
         run: |
           set -euo pipefail
@@ -71,88 +66,69 @@ jobs:
           mkdir -p "$PROJECT_DIR/libs"
 
           if [ -d "$GITHUB_WORKSPACE/libs" ]; then
-            cp -f "$GITHUB_WORKSPACE"/libs/*.jar "$PROJECT_DIR/libs/" 2>/dev/null || true
+            find "$GITHUB_WORKSPACE/libs" -maxdepth 1 -name '*.jar' -exec cp -f {} "$PROJECT_DIR/libs/" \;
           fi
 
-          echo "Libraries in project:"
-          ls -lh "$PROJECT_DIR/libs" || true
+          echo "Project libraries:"
+          ls -lh "$PROJECT_DIR/libs"
 
-      - name: Apply Minecraft and NeoForge compatibility fixes
+      - name: Apply compatibility fixes
         shell: bash
         run: |
           set -euo pipefail
 
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-          import os
+          JAVA_DIR="$PROJECT_DIR/src/main/java"
 
-          project = Path(os.environ["PROJECT_DIR"])
-          java_dir = project / "src" / "main" / "java"
+          if [ ! -d "$JAVA_DIR" ]; then
+            echo "ERROR: Java source directory not found."
+            exit 1
+          fi
 
-          if not java_dir.exists():
-              print("WARNING: Java source directory was not found.")
-              raise SystemExit(0)
+          for FILE in EffectsPage.java BookPages.java RpgBook.java; do
+            while IFS= read -r -d '' JAVA_FILE; do
+              sed -i 's/\bFormatting\b/ChatFormatting/g' "$JAVA_FILE"
 
-          def patch_file(filename, replacements):
-              matches = list(java_dir.rglob(filename))
+              if grep -q 'ChatFormatting' "$JAVA_FILE" &&
+                 ! grep -q 'import net.minecraft.ChatFormatting;' "$JAVA_FILE"; then
+                sed -i '/^package .*;/a import net.minecraft.ChatFormatting;' "$JAVA_FILE"
+              fi
 
-              if not matches:
-                  print(f"Not found: {filename}")
-                  return
+              echo "Checked $JAVA_FILE"
+            done < <(find "$JAVA_DIR" -name "$FILE" -print0)
+          done
 
-              for path in matches:
-                  content = path.read_text(encoding="utf-8")
-                  original = content
+          while IFS= read -r -d '' JAVA_FILE; do
+            sed -i \
+              -e 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/g' \
+              -e 's/getEntityModelSet()/getEntityModels()/g' \
+              "$JAVA_FILE"
 
-                  for old, new in replacements:
-                      content = content.replace(old, new)
+            echo "Checked $JAVA_FILE"
+          done < <(find "$JAVA_DIR" -name 'KillerArmorClient.java' -print0)
 
-                  if content != original:
-                      path.write_text(content, encoding="utf-8")
-                      print(f"Patched: {path}")
-                  else:
-                      print(f"No changes needed: {path}")
+      - name: Make Gradle wrapper executable
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          def replace_formatting(filename):
-              matches = list(java_dir.rglob(filename))
+          if [ ! -f "$PROJECT_DIR/gradlew" ]; then
+            echo "ERROR: gradlew not found."
+            ls -la "$PROJECT_DIR"
+            exit 1
+          fi
 
-              for path in matches:
-                  content = path.read_text(encoding="utf-8")
-                  original = content
+          chmod +x "$PROJECT_DIR/gradlew"
 
-                  content = re.sub(r"\bFormatting\b", "ChatFormatting", content)
+      - name: Build RealmForge
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ./gradlew build --no-daemon --stacktrace
 
-                  if "ChatFormatting" in content and "import net.minecraft.ChatFormatting;" not in content:
-                      package_match = re.search(r"(?m)^package\s+[^;]+;", content)
-                      if package_match:
-                          insert_at = package_match.end()
-                          content = (
-                              content[:insert_at]
-                              + "\n\nimport net.minecraft.ChatFormatting;"
-                              + content[insert_at:]
-                          )
-
-                  if content != original:
-                      path.write_text(content, encoding="utf-8")
-                      print(f"Updated formatting references: {path}")
-
-          for filename in ("EffectsPage.java", "BookPages.java", "RpgBook.java"):
-              replace_formatting(filename)
-
-          patch_file(
-              "KillerArmorClient.java",
-              [
-                  (
-                      "net.neoforged.neoforge.client.event.RegisterClientExtensionsEvent",
-                      "net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent",
-                  ),
-                  (
-                      "getEntityModelSet()",
-                      "getEntityModels()",
-                  ),
-              ],
-          )
-          PY
-
-      - name: Make Gradle wrapper executa
+      - name: Upload compiled mod
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: RealmForge-1.21.1
+          path: ${{ env.PROJECT_DIR }}/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 14
