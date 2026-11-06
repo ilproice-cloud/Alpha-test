@@ -1,3 +1,4 @@
+
 name: Build RealmForge
 
 on:
@@ -5,96 +6,57 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java 21
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: 21
 
-      - name: Setup Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.14.3
 
-      - name: Extract RealmForge Source
+      - name: Locate RealmForge project
         id: project
         shell: bash
         run: |
-          set -e
-
-          SOURCE="$RUNNER_TEMP/realmforge-source"
-          mkdir -p "$SOURCE"
-
-          echo "Looking for Gradle project..."
-
-          PROJECT=$(find "$GITHUB_WORKSPACE" -type f \
-            \( -name settings.gradle -o -name settings.gradle.kts \) \
-            -not -path '*/.git/*' -print -quit)
-
-          if [ -z "$PROJECT" ]; then
-            ZIP=$(find "$GITHUB_WORKSPACE" -maxdepth 2 \
-              -type f -name '*.zip' -print -quit)
-
-            if [ -z "$ZIP" ]; then
-              echo "ERROR: No source ZIP found!"
-              exit 1
-            fi
-
-            echo "Extracting: $ZIP"
-            unzip -q "$ZIP" -d "$SOURCE"
-
-            PROJECT=$(find "$SOURCE" -type f \
-              \( -name settings.gradle -o -name settings.gradle.kts \) \
-              -print -quit)
-          fi
-
-          if [ -z "$PROJECT" ]; then
-            echo "ERROR: Gradle project not found after extraction!"
-            find "$SOURCE" -maxdepth 5 -type f
+          if [ -f settings.gradle ] || [ -f settings.gradle.kts ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f realmforge-neoforge/settings.gradle ] || [ -f realmforge-neoforge/settings.gradle.kts ]; then
+            echo "dir=realmforge-neoforge" >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: Gradle project not found!"
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$PROJECT")
-
-          echo "Project found: $PROJECT_DIR"
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-
-      - name: Install Photon and LDLib2
+      - name: Verify libraries
+        working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
-        working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
-          set -e
-          mkdir -p libs
-
-          if compgen -G "$GITHUB_WORKSPACE/libs/*.jar" > /dev/null; then
-            cp -n "$GITHUB_WORKSPACE"/libs/*.jar libs/ || true
-          fi
-
-          echo "Available libraries:"
+          echo "Checking libs folder..."
           ls -lh libs/
 
-          ls libs/*photon*.jar
-          ls libs/*ldlib2*.jar
+          if ! compgen -G "libs/*.jar" > /dev/null; then
+            echo "ERROR: No library JARs found in libs/"
+            exit 1
+          fi
 
       - name: Build RealmForge
-        working-directory: ${{ steps.project.outputs.project_dir }}
-        run: |
-          gradle build --no-daemon --stacktrace
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: gradle build --no-daemon --stacktrace
 
-      - name: Upload RealmForge JAR
+      - name: Upload mod JAR
         uses: actions/upload-artifact@v4
         with:
           name: RealmForge-1.21.1
-          path: ${{ steps.project.outputs.project_dir }}/build/libs/*.jar
+          path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
           if-no-files-found: error
