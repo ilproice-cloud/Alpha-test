@@ -1,49 +1,63 @@
-name: Build RealmForge JAR
+name: Build RealmForge
 
 on:
   push:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 21
+      - name: Install Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: '21'
 
-      - name: Set up Gradle 8.14.3
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.14.3
 
-      # The Photon + LDLib2 jars are needed to compile. Commit them to libs/ OR set the repository
-      # variables PHOTON_JAR_URL and LDLIB2_JAR_URL (Settings > Secrets and variables > Actions > Variables).
-      - name: Get Photon and LDLib2
-        env:
-          PHOTON_JAR_URL: ${{ vars.PHOTON_JAR_URL }}
-          LDLIB2_JAR_URL: ${{ vars.LDLIB2_JAR_URL }}
+      - name: Find Gradle Project
+        id: locate
+        shell: bash
         run: |
-          mkdir -p libs
-          if ! ls libs/*.jar >/dev/null 2>&1; then
-            [ -n "$PHOTON_JAR_URL" ] && curl -fsSL -o libs/photon.jar "$PHOTON_JAR_URL"
-            [ -n "$LDLIB2_JAR_URL" ] && curl -fsSL -o libs/ldlib2.jar "$LDLIB2_JAR_URL"
+          echo "Searching for Gradle project..."
+
+          FILE=$(find . -type f \( \
+            -name settings.gradle \
+            -o -name settings.gradle.kts \
+          \) -not -path '*/.gradle/*' -not -path '*/build/*' -print -quit)
+
+          if [ -z "$FILE" ]; then
+            echo "ERROR: No Gradle project found!"
+            find . -maxdepth 5 -type f
+            exit 1
           fi
-          ls -la libs
-          ls libs/*.jar >/dev/null 2>&1 || { echo "::error::No jars in libs/. Commit photon + ldlib2 jars there or set PHOTON_JAR_URL / LDLIB2_JAR_URL."; exit 1; }
 
-      - name: Build
-        run: gradle build --no-daemon --stacktrace
+          DIR=$(dirname "$FILE")
+          echo "Found project in: $DIR"
+          echo "project_dir=$DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Upload JAR
+      - name: Build RealmForge
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
+        run: |
+          echo "Building RealmForge..."
+          gradle build --no-daemon --stacktrace
+
+      - name: Upload Mod JAR
         uses: actions/upload-artifact@v4
         with:
-          name: realmforge-jar
-          path: build/libs/*.jar
+          name: RealmForge-1.21.1
+          path: '**/build/libs/*.jar'
           if-no-files-found: error
