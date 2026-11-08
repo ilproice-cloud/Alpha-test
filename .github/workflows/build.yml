@@ -18,11 +18,24 @@ jobs:
         with:
           gradle-version: 8.14.3
 
+      - name: Locate project
+        id: project
+        shell: bash
+        run: |
+          f=$(find . -name settings.gradle -not -path '*/node_modules/*' | head -n 1)
+          if [ -z "$f" ]; then
+            echo "No settings.gradle found. Repo contents:"
+            find . -maxdepth 3 -not -path './.git/*'
+            exit 1
+          fi
+          echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
+
       - name: Build
+        working-directory: ${{ steps.project.outputs.dir }}
         run: gradle build --no-daemon --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
           name: realmforge-jar
-          path: build/libs/*.jar
+          path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
           if-no-files-found: error
