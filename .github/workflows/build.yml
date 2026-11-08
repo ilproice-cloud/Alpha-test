@@ -1,4 +1,4 @@
-name: RealmForge Build
+name: Build RealmForge
 
 on:
   workflow_dispatch:
@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   build:
+    name: Build Minecraft Mod
     runs-on: ubuntu-latest
 
     steps:
@@ -19,103 +20,47 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
 
-      - name: Install Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
 
-      - name: Extract RealmForge source
+      - name: Locate project
+        id: project
         shell: bash
         run: |
-          set -euo pipefail
-
-          ZIP_FILE="RealmForge-PrimePiece-Skill-Test-Update.zip"
-
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: Source ZIP not found: $ZIP_FILE"
-            ls -la
+          if [ -f "./gradlew" ] || [ -f "./build.gradle" ] || [ -f "./build.gradle.kts" ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f "./realmforge-neoforge/gradlew" ] || [ -f "./realmforge-neoforge/build.gradle" ] || [ -f "./realmforge-neoforge/build.gradle.kts" ]; then
+            echo "dir=realmforge-neoforge" >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: Could not find Gradle project."
+            find . -maxdepth 3 \( -name build.gradle -o -name build.gradle.kts -o -name gradlew \)
             exit 1
           fi
-
-          mkdir -p "$RUNNER_TEMP/realmforge-source"
-          unzip -q "$ZIP_FILE" -d "$RUNNER_TEMP/realmforge-source"
-
-          PROJECT_DIR="$(find "$RUNNER_TEMP/realmforge-source" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit | xargs -r dirname)"
-
-          if [ -z "$PROJECT_DIR" ]; then
-            PROJECT_DIR="$(find "$RUNNER_TEMP/realmforge-source" -type f \( -name build.gradle -o -name build.gradle.kts \) -print -quit | xargs -r dirname)"
-          fi
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Gradle project not found."
-            exit 1
-          fi
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found project: $PROJECT_DIR"
-
-      - name: Copy Photon and LDLib libraries
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p "$PROJECT_DIR/libs"
-
-          if [ -d "$GITHUB_WORKSPACE/libs" ]; then
-            find "$GITHUB_WORKSPACE/libs" -maxdepth 1 -type f -name '*.jar' \
-              -exec cp -f {} "$PROJECT_DIR/libs/" \;
-          fi
-
-          echo "Libraries:"
-          ls -lh "$PROJECT_DIR/libs"
-
-      - name: Apply compatibility fixes
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          JAVA_DIR="$PROJECT_DIR/src/main/java"
-
-          if [ ! -d "$JAVA_DIR" ]; then
-            echo "ERROR: Java source directory not found."
-            exit 1
-          fi
-
-          for FILE in EffectsPage.java BookPages.java RpgBook.java; do
-            while IFS= read -r -d '' JAVA_FILE; do
-              sed -i 's/\bFormatting\b/ChatFormatting/g' "$JAVA_FILE"
-
-              if grep -q 'ChatFormatting' "$JAVA_FILE" &&
-                 ! grep -q 'import net.minecraft.ChatFormatting;' "$JAVA_FILE"; then
-                sed -i '/^package .*;/a import net.minecraft.ChatFormatting;' "$JAVA_FILE"
-              fi
-            done < <(find "$JAVA_DIR" -name "$FILE" -print0)
-          done
-
-          while IFS= read -r -d '' JAVA_FILE; do
-            sed -i \
-              -e 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/g' \
-              -e 's/getEntityModelSet()/getEntityModels()/g' \
-              "$JAVA_FILE"
-          done < <(find "$JAVA_DIR" -name 'KillerArmorClient.java' -print0)
 
       - name: Build RealmForge
+        working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
-        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          set -euo pipefail
-          gradle build --no-daemon --stacktrace
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon clean build
+          else
+            gradle --no-daemon clean build
+          fi
 
       - name: Upload compiled mod
         uses: actions/upload-artifact@v4
-        if: success()
         with:
-          name: RealmForge-1.21.1
-          path: ${{ env.PROJECT_DIR }}/build/libs/*.jar
+          name: RealmForge-Build
+          path: |
+            ${{ steps.project.outputs.dir }}/build/libs/*.jar
           if-no-files-found: error
           retention-days: 14
