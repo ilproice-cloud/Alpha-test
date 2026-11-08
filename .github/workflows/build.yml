@@ -19,7 +19,7 @@ jobs:
           gradle-version: 8.14.3
 
       - name: Unzip project
-        run: unzip -q -o RealmForge_Uppercut_Upd.zip -d project
+        run: unzip -q -o RealmForge-Uppercut-NoParticles-Animation-Fix.zip -d project
 
       - name: Locate project
         id: project
@@ -37,13 +37,23 @@ jobs:
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
+          # compile fixes
           for n in EffectsPage BookPages RpgBook; do
             for f in $(find src -name "$n.java"); do
               sed -i 's/\bFormatting\.\.\./ChatFormatting.../' "$f"
             done
           done
-          for f in $(find src -name "KillerArmorClient.java"); do
+          for f in $(find src -name KillerArmorClient.java); do
             sed -i 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/; s/getEntityModelSet()/getEntityModels()/' "$f"
+          done
+          # animation fix 1: position offsets are already in pixels
+          for f in $(find src -name AnimClient.java); do
+            sed -i 's| \* POS_SIGN\[\([0-2]\)\] / 16.0F;| * POS_SIGN[\1];|' "$f"
+          done
+          # animation fix 2: hat layer follows the head
+          for f in $(find src -name HumanoidModelMixin.java); do
+            sed -i 's|public ModelPart leftArm;|&\n   @Shadow @Final public ModelPart hat;\n   @Shadow @Final public ModelPart head;|' "$f"
+            sed -i 's|AnimClient.apply((HumanoidModel<?>)(Object)this, entity.getUUID());|&\n      this.hat.copyFrom(this.head);|' "$f"
           done
 
       - name: Build
