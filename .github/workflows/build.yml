@@ -33,6 +33,18 @@ jobs:
           fi
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
 
+      - name: Patch source fixes
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          J=src/main/java/com/realmforge
+          sed -i 's/\bFormatting\.\.\./ChatFormatting.../' \
+            $J/addon/client/EffectsPage.java \
+            $J/addon/client/BookPages.java \
+            $J/client/RpgBook.java
+          sed -i 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/; s/getEntityModelSet()/getEntityModels()/' \
+            $J/addon/client/KillerArmorClient.java
+
       - name: Build
         working-directory: ${{ steps.project.outputs.dir }}
         run: gradle build --no-daemon --stacktrace
@@ -42,4 +54,3 @@ jobs:
           name: realmforge-jar
           path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
           if-no-files-found: error
-N
