@@ -18,14 +18,17 @@ jobs:
         with:
           gradle-version: 8.14.3
 
+      - name: Unzip project
+        run: unzip -q -o RealmForge-Uppercut-Update.zip -d project
+
       - name: Locate project
         id: project
         shell: bash
         run: |
-          f=$(find . -name settings.gradle -not -path '*/node_modules/*' | head -n 1)
+          f=$(find project -name settings.gradle | head -n 1)
           if [ -z "$f" ]; then
-            echo "No settings.gradle found. Repo contents:"
-            find . -maxdepth 3 -not -path './.git/*'
+            echo "No settings.gradle found in the zip:"
+            find project -maxdepth 3
             exit 1
           fi
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
