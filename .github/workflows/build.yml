@@ -19,7 +19,7 @@ jobs:
           gradle-version: 8.14.3
 
       - name: Unzip project
-        run: unzip -q -o RealmForge-Uppercut-Update.zip -d project
+        run: unzip -q -o RealmForge-Animation-Pose-Fix.zip -d project
 
       - name: Locate project
         id: project
