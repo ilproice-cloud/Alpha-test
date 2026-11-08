@@ -19,7 +19,7 @@ jobs:
           gradle-version: 8.14.3
 
       - name: Unzip project
-        run: unzip -q -o RealmForge-Animation-Pose-Fix.zip -d project
+        run: unzip -q -o RealmForge_Uppercut_Upd.zip -d project
 
       - name: Locate project
         id: project
@@ -37,13 +37,14 @@ jobs:
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          J=src/main/java/com/realmforge
-          sed -i 's/\bFormatting\.\.\./ChatFormatting.../' \
-            $J/addon/client/EffectsPage.java \
-            $J/addon/client/BookPages.java \
-            $J/client/RpgBook.java
-          sed -i 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/; s/getEntityModelSet()/getEntityModels()/' \
-            $J/addon/client/KillerArmorClient.java
+          for n in EffectsPage BookPages RpgBook; do
+            for f in $(find src -name "$n.java"); do
+              sed -i 's/\bFormatting\.\.\./ChatFormatting.../' "$f"
+            done
+          done
+          for f in $(find src -name "KillerArmorClient.java"); do
+            sed -i 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/; s/getEntityModelSet()/getEntityModels()/' "$f"
+          done
 
       - name: Build
         working-directory: ${{ steps.project.outputs.dir }}
