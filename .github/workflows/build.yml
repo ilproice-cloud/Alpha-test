@@ -1,3 +1,4 @@
+
 name: Build RealmForge
 
 on:
@@ -12,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Minecraft Mod
+    name: Build RealmForge Mod
     runs-on: ubuntu-latest
 
     steps:
@@ -20,47 +21,58 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
+
+      - name: Locate RealmForge project
+        id: project
+        shell: bash
+        run: |
+          if [ -f "realmforge-neoforge/build.gradle" ] || [ -f "realmforge-neoforge/build.gradle.kts" ]; then
+            echo "dir=realmforge-neoforge" >> "$GITHUB_OUTPUT"
+          elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: Gradle project not found."
+            echo "Repository files:"
+            find . -maxdepth 4 -type f | head -200
+            exit 1
+          fi
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
 
-      - name: Locate project
-        id: project
-        shell: bash
+      - name: Verify Java and Gradle
         run: |
-          if [ -f "./gradlew" ] || [ -f "./build.gradle" ] || [ -f "./build.gradle.kts" ]; then
-            echo "dir=." >> "$GITHUB_OUTPUT"
-          elif [ -f "./realmforge-neoforge/gradlew" ] || [ -f "./realmforge-neoforge/build.gradle" ] || [ -f "./realmforge-neoforge/build.gradle.kts" ]; then
-            echo "dir=realmforge-neoforge" >> "$GITHUB_OUTPUT"
-          else
-            echo "ERROR: Could not find Gradle project."
-            find . -maxdepth 3 \( -name build.gradle -o -name build.gradle.kts -o -name gradlew \)
-            exit 1
-          fi
+          java -version
+          gradle --version
+
+      - name: Verify project configuration
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          echo "Checking RealmForge Gradle files..."
+          test -f build.gradle -o -f build.gradle.kts
+          test -f settings.gradle -o -f settings.gradle.kts
+          echo "Project configuration found."
 
       - name: Build RealmForge
         working-directory: ${{ steps.project.outputs.dir }}
-        shell: bash
         run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew --no-daemon clean build
-          else
-            gradle --no-daemon clean build
-          fi
+          gradle --no-daemon clean build
 
-      - name: Upload compiled mod
+      - name: List generated JAR files
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          find build/libs -maxdepth 1 -type f -name "*.jar" -print
+
+      - name: Upload compiled RealmForge JAR
         uses: actions/upload-artifact@v4
         with:
           name: RealmForge-Build
-          path: |
-            ${{ steps.project.outputs.dir }}/build/libs/*.jar
+          path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
           if-no-files-found: error
           retention-days: 14
