@@ -1,5 +1,4 @@
 name: Build RealmForge
-
 on:
   push:
   workflow_dispatch:
@@ -7,109 +6,51 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.14.3
 
       - name: Unzip project
-        run: |
-          if [ ! -f RealmForge-Uppercut-NoParticles-Animation-Fix.zip ]; then
-            echo "ERROR: Project ZIP not found in repository root."
-            exit 1
-          fi
-
-          mkdir -p project
-          unzip -q -o RealmForge-Uppercut-NoParticles-Animation-Fix.zip -d project
+        run: unzip -q -o RealmForge-Segmented-HUD-Update.zip -d project
 
       - name: Locate project
         id: project
         shell: bash
         run: |
-          f=$(find project -name settings.gradle -o -name settings.gradle.kts | head -n 1)
-
+          f=$(find project -name settings.gradle | head -n 1)
           if [ -z "$f" ]; then
-            echo "ERROR: No Gradle settings file found."
-            find project -maxdepth 4 -type f | head -100
+            echo "No settings.gradle found in the zip:"
+            find project -maxdepth 3
             exit 1
           fi
-
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
 
-      - name: Apply compatibility fixes
+      - name: Patch source fixes
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          set -e
-
-          # Fix Formatting references in affected GUI classes.
-          while IFS= read -r -d '' f; do
-            sed -i 's/Formatting\.\.\./ChatFormatting.../g' "$f"
-          done < <(
-            find src -type f \( \
-              -name "EffectsPage.java" -o \
-              -name "BookPages.java" -o \
-              -name "RpgBook.java" \
-            \) -print0
-          )
-
-          # Fix NeoForge client extension imports and model accessor.
-          while IFS= read -r -d '' f; do
-            sed -i \
-              's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/g; s/getEntityModelSet()/getEntityModels()/g' \
-              "$f"
-          done < <(find src -name "KillerArmorClient.java" -print0)
-
-      - name: Verify Uppercut animation and particle removal
-        working-directory: ${{ steps.project.outputs.dir }}
-        shell: bash
-        run: |
-          set -e
-
-          ANIM="src/main/java/com/realmforge/addon/anim/AnimClient.java"
-          MIXIN="src/main/java/com/realmforge/addon/mixin/client/HumanoidModelMixin.java"
-          SKILL="src/main/java/com/realmforge/skill/skills/UppercutSkill.java"
-          CLIP="src/main/resources/assets/realmforge/player_animation/uppercut.json"
-
-          for f in "$ANIM" "$MIXIN" "$SKILL" "$CLIP"; do
-            if [ ! -f "$f" ]; then
-              echo "ERROR: Required file missing: $f"
-              exit 1
-            fi
+          for n in EffectsPage BookPages RpgBook; do
+            for f in $(find src -name "$n.java"); do
+              sed -i 's/\bFormatting\.\.\./ChatFormatting.../' "$f"
+            done
+          done
+          for f in $(find src -name KillerArmorClient.java); do
+            sed -i 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/; s/getEntityModelSet()/getEntityModels()/' "$f"
           done
 
-          # Do not apply destructive regex patches to AnimClient.
-          # Its existing implementation uses first-keyframe-relative
-          # transforms and Blockbench /16 position scaling.
-
-          echo "Uppercut animation files found."
-          echo "Original animation implementation preserved."
-
-          # Verify the skill does not explicitly spawn particles.
-          if grep -nE 'sendParticles|addParticle|ParticleTypes' "$SKILL"; then
-            echo "ERROR: Particle spawning still exists in UppercutSkill."
-            exit 1
-          fi
-
-          echo "No explicit Uppercut skill particle spawning found."
-
-      - name: Build RealmForge
+      - name: Build
         working-directory: ${{ steps.project.outputs.dir }}
         run: gradle build --no-daemon --stacktrace
 
-      - name: Upload RealmForge JAR
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: realmforge-jar
           path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
