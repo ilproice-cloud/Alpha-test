@@ -46,12 +46,8 @@ jobs:
           for f in $(find src -name KillerArmorClient.java); do
             sed -i 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/; s/getEntityModelSet()/getEntityModels()/' "$f"
           done
-          # hat layer follows the head
-          for f in $(find src -name HumanoidModelMixin.java); do
-            sed -i 's|public ModelPart leftArm;|&\n   @Shadow @Final public ModelPart hat;\n   @Shadow @Final public ModelPart head;|' "$f"
-            sed -i 's|AnimClient.apply((HumanoidModel<?>)(Object)this, entity.getUUID());|&\n      this.hat.copyFrom(this.head);|' "$f"
-          done
-          # animation: absolute poses, ease in/out, slowed to 0.65x
+
+          # animation patch for AnimClient
           cat > /tmp/patch_anim.py <<'PYEOF'
           import re, sys, pathlib
           p = pathlib.Path(sys.argv[1]); s = p.read_text()
@@ -61,15 +57,47 @@ jobs:
           s = re.sub(r"(POS_SIGN\[[0-2]\]);", r"\1 * w;", s)
           anchor = "      float[] v = new float[3];\n"
           assert anchor in s, "anchor missing"
-          s = s.replace(anchor, "      float w = Math.min(1.0F, Math.min(t / 0.08F, (a.clip.length - t) / 0.2F));\n      w = w * w * (3.0F - 2.0F * w);\n" + anchor, 1)
-          assert "speed <= 0.0F ? 1.0F : speed" in s, "speed anchor missing"
-          s = s.replace("speed <= 0.0F ? 1.0F : speed", "0.65F")
+          s = s.replace(anchor, "      DIRTY.add(model);\n      float w = Math.min(1.0F, Math.min(t / 0.08F, (a.clip.length - t) / 0.2F));\n      w = w * w * (3.0F - 2.0F * w);\n" + anchor, 1)
+          ctor = "   private AnimClient() {\n"
+          assert ctor in s, "ctor anchor missing"
+          s = s.replace(ctor, """   private static final java.util.Set<Object> DIRTY = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+             /** Vanilla never resets some fields (body/head zRot, positions), so undo our additive changes before it poses the model. */
+             public static void resetIfDirty(HumanoidModel<?> m) {
+                if (DIRTY.remove(m)) {
+                   for (int i = 0; i < 6; i++) {
+                      part(m, i).resetPose();
+                   }
+                }
+             }
+
+          """ + ctor, 1)
           p.write_text(s)
           PYEOF
+
+          # mixin patch: reset before vanilla poses the model
+          cat > /tmp/patch_mixin.py <<'PYEOF'
+          import sys, pathlib
+          p = pathlib.Path(sys.argv[1]); s = p.read_text()
+          anchor = '   @Inject(method = "setupAnim(Lnet/minecraft/world/entity/LivingEntity;FFFFF)V", at = @At("TAIL"))'
+          assert anchor in s, "mixin anchor missing"
+          s = s.replace(anchor, '''   @Inject(method = "setupAnim(Lnet/minecraft/world/entity/LivingEntity;FFFFF)V", at = @At("HEAD"))
+             private void realmforge$beforePose(LivingEntity entity, float f1, float f2, float f3, float f4, float f5, CallbackInfo ci) {
+                AnimClient.resetIfDirty((HumanoidModel<?>)(Object)this);
+             }
+
+          ''' + anchor, 1)
+          p.write_text(s)
+          PYEOF
+
           for f in $(find src -name AnimClient.java); do
             python3 /tmp/patch_anim.py "$f"
             sed -i "s|ROT_SIGN = new float\[\]{[^}]*}|ROT_SIGN = new float[]{1.0F, 1.0F, 1.0F}|; s|POS_SIGN = new float\[\]{[^}]*}|POS_SIGN = new float[]{0.0F, 0.0F, 0.0F}|" "$f"
-            grep -n "_SIGN = \|0.65F" "$f"
+          done
+          for f in $(find src -name HumanoidModelMixin.java); do
+            python3 /tmp/patch_mixin.py "$f"
+            sed -i 's|public ModelPart leftArm;|&\n   @Shadow @Final public ModelPart hat;\n   @Shadow @Final public ModelPart head;|' "$f"
+            sed -i 's|AnimClient.apply((HumanoidModel<?>)(Object)this, entity.getUUID());|&\n      this.hat.copyFrom(this.head);|' "$f"
           done
 
       - name: Build
