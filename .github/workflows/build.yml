@@ -90,22 +90,23 @@ jobs:
           p.write_text(s)
           PYEOF
 
+          # custom uppercut clip made for the vanilla player model
+          cat > /tmp/make_clip.py <<'PYEOF'
+          import json, sys
+          T = ["0.0", "0.12", "0.25", "0.4", "0.6"]
+          B = {
+           "body":      [[0,0,0], [12,35,0],   [-8,-45,0],   [-4,-30,0],  [0,0,0]],
+           "head":      [[0,0,0], [-5,-30,0],  [-25,40,0],   [-15,25,0],  [0,0,0]],
+           "right_arm": [[0,0,0], [35,-10,8],  [-165,-10,5], [-120,-5,0], [0,0,0]],
+           "left_arm":  [[0,0,0], [-80,20,0],  [-95,20,0],   [-85,15,0],  [0,0,0]],
+           "right_leg": [[0,0,0], [20,0,0],    [-12,0,0],    [-6,0,0],    [0,0,0]],
+           "left_leg":  [[0,0,0], [-20,0,0],   [10,0,0],     [5,0,0],     [0,0,0]],
+          }
+          bones = {n: {"rotation": {t: {"vector": v} for t, v in zip(T, vs)}} for n, vs in B.items()}
+          clip = {"format_version": "1.8.0", "animations": {"uppercut": {"animation_length": 0.6, "bones": bones}}}
+          json.dump(clip, open(sys.argv[1], "w"), indent=2)
+          PYEOF
+
           for f in $(find src -name AnimClient.java); do
             python3 /tmp/patch_anim.py "$f"
-            sed -i "s|ROT_SIGN = new float\[\]{[^}]*}|ROT_SIGN = new float[]{1.0F, 1.0F, 1.0F}|; s|POS_SIGN = new float\[\]{[^}]*}|POS_SIGN = new float[]{0.0F, 0.0F, 0.0F}|" "$f"
-          done
-          for f in $(find src -name HumanoidModelMixin.java); do
-            python3 /tmp/patch_mixin.py "$f"
-            sed -i 's|public ModelPart leftArm;|&\n   @Shadow @Final public ModelPart hat;\n   @Shadow @Final public ModelPart head;|' "$f"
-            sed -i 's|AnimClient.apply((HumanoidModel<?>)(Object)this, entity.getUUID());|&\n      this.hat.copyFrom(this.head);|' "$f"
-          done
-
-      - name: Build
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: gradle build --no-daemon --stacktrace
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: realmforge-jar
-          path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
-          if-no-files-found: error
+            sed -i "s|ROT_SIGN = new float\[\]{[^}]*}|ROT_SIGN = new float[]{1.0F, 1.0F, 1.0F}|; s|POS_SIGN = new float\[\]{[^}]*}|POS_SIGN = new float[]{0.0F, 0.0F,
