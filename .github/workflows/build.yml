@@ -1,4 +1,5 @@
 name: Build RealmForge
+
 on:
   push:
   workflow_dispatch:
@@ -6,107 +7,110 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.14.3
 
       - name: Unzip project
-        run: unzip -q -o RealmForge-Uppercut-NoParticles-Animation-Fix.zip -d project
+        run: |
+          if [ ! -f RealmForge-Uppercut-NoParticles-Animation-Fix.zip ]; then
+            echo "ERROR: Project ZIP not found in repository root."
+            exit 1
+          fi
+
+          mkdir -p project
+          unzip -q -o RealmForge-Uppercut-NoParticles-Animation-Fix.zip -d project
 
       - name: Locate project
         id: project
         shell: bash
         run: |
-          f=$(find project -name settings.gradle | head -n 1)
+          f=$(find project -name settings.gradle -o -name settings.gradle.kts | head -n 1)
+
           if [ -z "$f" ]; then
-            echo "No settings.gradle found in the zip:"
-            find project -maxdepth 3
+            echo "ERROR: No Gradle settings file found."
+            find project -maxdepth 4 -type f | head -100
             exit 1
           fi
+
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
 
-      - name: Patch source fixes
+      - name: Apply compatibility fixes
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          # compile fixes
-          for n in EffectsPage BookPages RpgBook; do
-            for f in $(find src -name "$n.java"); do
-              sed -i 's/\bFormatting\.\.\./ChatFormatting.../' "$f"
-            done
+          set -e
+
+          # Fix Formatting references in affected GUI classes.
+          while IFS= read -r -d '' f; do
+            sed -i 's/Formatting\.\.\./ChatFormatting.../g' "$f"
+          done < <(
+            find src -type f \( \
+              -name "EffectsPage.java" -o \
+              -name "BookPages.java" -o \
+              -name "RpgBook.java" \
+            \) -print0
+          )
+
+          # Fix NeoForge client extension imports and model accessor.
+          while IFS= read -r -d '' f; do
+            sed -i \
+              's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/g; s/getEntityModelSet()/getEntityModels()/g' \
+              "$f"
+          done < <(find src -name "KillerArmorClient.java" -print0)
+
+      - name: Verify Uppercut animation and particle removal
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          set -e
+
+          ANIM="src/main/java/com/realmforge/addon/anim/AnimClient.java"
+          MIXIN="src/main/java/com/realmforge/addon/mixin/client/HumanoidModelMixin.java"
+          SKILL="src/main/java/com/realmforge/skill/skills/UppercutSkill.java"
+          CLIP="src/main/resources/assets/realmforge/player_animation/uppercut.json"
+
+          for f in "$ANIM" "$MIXIN" "$SKILL" "$CLIP"; do
+            if [ ! -f "$f" ]; then
+              echo "ERROR: Required file missing: $f"
+              exit 1
+            fi
           done
-          for f in $(find src -name KillerArmorClient.java); do
-            sed -i 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/; s/getEntityModelSet()/getEntityModels()/' "$f"
-          done
 
-          # animation patch for AnimClient
-          cat > /tmp/patch_anim.py <<'PYEOF'
-          import re, sys, pathlib
-          p = pathlib.Path(sys.argv[1]); s = p.read_text()
-          s = s.replace(" / 16.0F;", ";")
-          s = re.sub(r"\(v\[([0-2])\] - base\[[0-2]\]\)", r"v[\1]", s)
-          s = re.sub(r"(ROT_SIGN\[[0-2]\])\)", r"\1 * w)", s)
-          s = re.sub(r"(POS_SIGN\[[0-2]\]);", r"\1 * w;", s)
-          anchor = "      float[] v = new float[3];\n"
-          assert anchor in s, "anchor missing"
-          s = s.replace(anchor, "      DIRTY.add(model);\n      float w = Math.min(1.0F, Math.min(t / 0.08F, (a.clip.length - t) / 0.2F));\n      w = w * w * (3.0F - 2.0F * w);\n" + anchor, 1)
-          ctor = "   private AnimClient() {\n"
-          assert ctor in s, "ctor anchor missing"
-          s = s.replace(ctor, """   private static final java.util.Set<Object> DIRTY = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+          # Do not apply destructive regex patches to AnimClient.
+          # Its existing implementation uses first-keyframe-relative
+          # transforms and Blockbench /16 position scaling.
 
-             /** Vanilla never resets some fields (body/head zRot, positions), so undo our additive changes before it poses the model. */
-             public static void resetIfDirty(HumanoidModel<?> m) {
-                if (DIRTY.remove(m)) {
-                   for (int i = 0; i < 6; i++) {
-                      part(m, i).resetPose();
-                   }
-                }
-             }
+          echo "Uppercut animation files found."
+          echo "Original animation implementation preserved."
 
-          """ + ctor, 1)
-          p.write_text(s)
-          PYEOF
+          # Verify the skill does not explicitly spawn particles.
+          if grep -nE 'sendParticles|addParticle|ParticleTypes' "$SKILL"; then
+            echo "ERROR: Particle spawning still exists in UppercutSkill."
+            exit 1
+          fi
 
-          # mixin patch: reset before vanilla poses the model
-          cat > /tmp/patch_mixin.py <<'PYEOF'
-          import sys, pathlib
-          p = pathlib.Path(sys.argv[1]); s = p.read_text()
-          anchor = '   @Inject(method = "setupAnim(Lnet/minecraft/world/entity/LivingEntity;FFFFF)V", at = @At("TAIL"))'
-          assert anchor in s, "mixin anchor missing"
-          s = s.replace(anchor, '''   @Inject(method = "setupAnim(Lnet/minecraft/world/entity/LivingEntity;FFFFF)V", at = @At("HEAD"))
-             private void realmforge$beforePose(LivingEntity entity, float f1, float f2, float f3, float f4, float f5, CallbackInfo ci) {
-                AnimClient.resetIfDirty((HumanoidModel<?>)(Object)this);
-             }
+          echo "No explicit Uppercut skill particle spawning found."
 
-          ''' + anchor, 1)
-          p.write_text(s)
-          PYEOF
+      - name: Build RealmForge
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: gradle build --no-daemon --stacktrace
 
-          # custom uppercut clip made for the vanilla player model
-          cat > /tmp/make_clip.py <<'PYEOF'
-          import json, sys
-          T = ["0.0", "0.12", "0.25", "0.4", "0.6"]
-          B = {
-           "body":      [[0,0,0], [12,35,0],   [-8,-45,0],   [-4,-30,0],  [0,0,0]],
-           "head":      [[0,0,0], [-5,-30,0],  [-25,40,0],   [-15,25,0],  [0,0,0]],
-           "right_arm": [[0,0,0], [35,-10,8],  [-165,-10,5], [-120,-5,0], [0,0,0]],
-           "left_arm":  [[0,0,0], [-80,20,0],  [-95,20,0],   [-85,15,0],  [0,0,0]],
-           "right_leg": [[0,0,0], [20,0,0],    [-12,0,0],    [-6,0,0],    [0,0,0]],
-           "left_leg":  [[0,0,0], [-20,0,0],   [10,0,0],     [5,0,0],     [0,0,0]],
-          }
-          bones = {n: {"rotation": {t: {"vector": v} for t, v in zip(T, vs)}} for n, vs in B.items()}
-          clip = {"format_version": "1.8.0", "animations": {"uppercut": {"animation_length": 0.6, "bones": bones}}}
-          json.dump(clip, open(sys.argv[1], "w"), indent=2)
-          PYEOF
-
-          for f in $(find src -name AnimClient.java); do
-            python3 /tmp/patch_anim.py "$f"
-            sed -i "s|ROT_SIGN = new float\[\]{[^}]*}|ROT_SIGN = new float[]{1.0F, 1.0F, 1.0F}|; s|POS_SIGN = new float\[\]{[^}]*}|POS_SIGN = new float[]{0.0F, 0.0F,
+      - name: Upload RealmForge JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: realmforge-jar
+          path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
+          if-no-files-found: error
