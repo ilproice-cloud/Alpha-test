@@ -19,7 +19,7 @@ jobs:
           gradle-version: 8.14.3
 
       - name: Unzip project
-        run: unzip -q -o RealmForge-Segmented-HUD-Update.zip -d project
+        run: unzip -q -o RealmForge-Main-GUI-Centered-Indicators.zip -d project
 
       - name: Locate project
         id: project
