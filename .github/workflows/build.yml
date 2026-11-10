@@ -3,6 +3,13 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,6 +27,7 @@ jobs:
         with:
           gradle-version: 8.14.3
 
+      # Picks the zip in the repo root that was committed most recently.
       - name: Find newest zip
         id: zip
         shell: bash
@@ -28,7 +36,8 @@ jobs:
           for z in *.zip; do
             [ -e "$z" ] || continue
             t=$(git log -1 --format=%ct -- "$z")
-            if [ "$t" -gt "$bestt" ]; then bestt=$t; best=$z; fi
+            t=${t:-0}
+            if [ "$t" -ge "$bestt" ]; then bestt=$t; best=$z; fi
           done
           if [ -z "$best" ]; then
             echo "No zip found in repo root:"
@@ -39,13 +48,15 @@ jobs:
           echo "name=$best" >> "$GITHUB_OUTPUT"
 
       - name: Unzip project
-        run: unzip -q -o "${{ steps.zip.outputs.name }}" -d project
+        run: |
+          rm -rf project
+          unzip -q -o "${{ steps.zip.outputs.name }}" -d project
 
       - name: Locate project
         id: project
         shell: bash
         run: |
-          f=$(find project -name settings.gradle | head -n 1)
+          f=$(find project -name settings.gradle -not -path '*/__MACOSX/*' | head -n 1)
           if [ -z "$f" ]; then
             echo "No settings.gradle found in the zip:"
             find project -maxdepth 3
@@ -53,18 +64,30 @@ jobs:
           fi
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
 
+      # This mod needs no Photon / LDLib2 / extra jars: everything comes from NeoForge via build.gradle.
+      # Two small NeoForge 1.21.1 API fixes are applied to KillerArmorClient (safe to re-run).
       - name: Patch source fixes
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          for n in EffectsPage BookPages RpgBook; do
-            for f in $(find src -name "$n.java"); do
-              sed -i 's/\bFormatting\.\.\./ChatFormatting.../' "$f"
-            done
+          # Old Yarn-style "Formatting" -> Mojang "ChatFormatting" (no-op if already fixed)
+          for f in $(grep -rlE '(^|[^A-Za-z])Formatting\.' src --include=*.java); do
+            sed -i -E 's/(^|[^A-Za-z])Formatting\./\1ChatFormatting./g' "$f"
           done
+
           for f in $(find src -name KillerArmorClient.java); do
             sed -i 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/; s/getEntityModelSet()/getEntityModels()/' "$f"
+            grep -n "RegisterClientExtensionsEvent;\|getEntityModels" "$f"
           done
+
+      - name: Check project has no external jars needed
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          if grep -rIl "com\.lowdragmc\|photon" src build.gradle >/dev/null 2>&1; then
+            echo "WARNING: this project references Photon/LDLib2; it needs jars in libs/."
+            ls -la libs 2>/dev/null || true
+          fi
 
       - name: Build
         working-directory: ${{ steps.project.outputs.dir }}
