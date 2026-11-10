@@ -55,16 +55,15 @@ jobs:
           fi
 
           if [ -z "$best" ]; then
-            echo "RealmForge ZIP not found in repository root."
+            echo "ERROR: RealmForge ZIP not found."
             ls -la
             exit 1
           fi
 
-          echo "Using $best"
+          echo "Using: $best"
           echo "name=$best" >> "$GITHUB_OUTPUT"
 
       - name: Extract project
-        shell: bash
         run: |
           set -euo pipefail
           rm -rf project
@@ -82,41 +81,84 @@ jobs:
             -not -path '*/__MACOSX/*' | head -n 1)
 
           if [ -z "$f" ]; then
-            echo "ERROR: No Gradle settings file found."
-            find project -maxdepth 4 -type f | head -200
+            echo "ERROR: settings.gradle not found."
+            find project -maxdepth 4 -type f
             exit 1
           fi
 
           dir=$(dirname "$f")
-          echo "Project directory: $dir"
+          echo "Found project: $dir"
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
       - name: Check Gradle files
         working-directory: ${{ steps.project.outputs.dir }}
-        shell: bash
         run: |
           set -euo pipefail
 
-          if [ ! -f build.gradle ] && [ ! -f build.gradle.kts ]; then
-            echo "ERROR: build.gradle or build.gradle.kts missing."
-            ls -la
-            exit 1
-          fi
+          test -f build.gradle || test -f build.gradle.kts
 
-          echo "Gradle project found."
+          echo "Gradle project verified."
 
-      - name: Build RealmForge
+      - name: Fix NeoForge 1.21.1 API errors
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
           set -euo pipefail
+
+          FILE="src/main/java/com/realmforge/addon/client/KillerArmorClient.java"
+
+          if [ ! -f "$FILE" ]; then
+            echo "ERROR: KillerArmorClient.java not found."
+            exit 1
+          fi
+
+          # Correct RegisterClientExtensionsEvent package
+          sed -i \
+            's|net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent|net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent|g' \
+            "$FILE"
+
+          # Correct Minecraft EntityModelSet accessor
+          sed -i \
+            's/getEntityModelSet()/getEntityModels()/g' \
+            "$FILE"
+
+          echo "Checking fixes..."
+
+          grep -n "RegisterClientExtensionsEvent" "$FILE"
+          grep -n "getEntityModels()" "$FILE"
+
+          if grep -q "client.event.RegisterClientExtensionsEvent" "$FILE"; then
+            echo "ERROR: Old event import remains."
+            exit 1
+          fi
+
+          if grep -q "getEntityModelSet()" "$FILE"; then
+            echo "ERROR: Old model accessor remains."
+            exit 1
+          fi
+
+          echo "API compatibility patches applied."
+
+      - name: Verify skill source files
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          echo "Checking RealmForge source..."
+
+          find src/main/java -type f \
+            | grep -Ei 'Barrage|HeavyPunch|Uppercut|Skill' || true
+
+          echo "Source inspection complete."
+
+      - name: Build RealmForge
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
           gradle build --no-daemon --stacktrace
 
       - name: Upload RealmForge JAR
         uses: actions/upload-artifact@v4
         with:
-          name: RealmForge
-          path: |
-            ${{ steps.project.outputs.dir }}/build/libs/*.jar
+          name: RealmForge-Skills
+          path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
           if-no-files-found: error
           retention-days: 14
