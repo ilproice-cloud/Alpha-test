@@ -19,7 +19,7 @@ jobs:
           gradle-version: 8.14.3
 
       - name: Unzip project
-        run: unzip -q -o RealmForge-HUD-Smaller-75pct.zip -d project
+        run: unzip -q -o RealmForge-HUD-Smaller-75pct_1.zip -d project
 
       - name: Locate project
         id: project
