@@ -28,15 +28,17 @@ jobs:
           gradle-version: 8.14.3
 
       # Picks the zip in the repo root that was committed most recently.
+      # If several zips share the same commit time, the alphabetically last name wins.
       - name: Find newest zip
         id: zip
         shell: bash
         run: |
-          best=""; bestt=0
+          best=""; bestt=-1
           for z in *.zip; do
             [ -e "$z" ] || continue
             t=$(git log -1 --format=%ct -- "$z")
             t=${t:-0}
+            echo "  $z  (commit time $t)"
             if [ "$t" -ge "$bestt" ]; then bestt=$t; best=$z; fi
           done
           if [ -z "$best" ]; then
@@ -64,20 +66,33 @@ jobs:
           fi
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
 
-      # This mod needs no Photon / LDLib2 / extra jars: everything comes from NeoForge via build.gradle.
-      # Two small NeoForge 1.21.1 API fixes are applied to KillerArmorClient (safe to re-run).
+      # No Photon / LDLib2 / extra jars needed: everything comes from NeoForge via build.gradle.
+      # Small NeoForge 1.21.1 API fixes (safe to re-run).
       - name: Patch source fixes
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
           # Old Yarn-style "Formatting" -> Mojang "ChatFormatting" (no-op if already fixed)
-          for f in $(grep -rlE '(^|[^A-Za-z])Formatting\.' src --include=*.java); do
+          for f in $(grep -rlE '(^|[^A-Za-z])Formatting\.' src --include=*.java || true); do
             sed -i -E 's/(^|[^A-Za-z])Formatting\./\1ChatFormatting./g' "$f"
           done
 
           for f in $(find src -name KillerArmorClient.java); do
             sed -i 's/net\.neoforged\.neoforge\.client\.event\.RegisterClientExtensionsEvent/net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent/; s/getEntityModelSet()/getEntityModels()/' "$f"
-            grep -n "RegisterClientExtensionsEvent;\|getEntityModels" "$f"
+            grep -n "RegisterClientExtensionsEvent;\|getEntityModels" "$f" || true
+          done
+
+      - name: Sanity check new content is in the zip
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          # Informational only: confirms the Slaughter Demon + Uppercut files are in this build.
+          for f in \
+            src/main/java/com/realmforge/addon/item/WeaponItems.java \
+            src/main/java/com/realmforge/addon/client/UppercutClient.java \
+            src/main/resources/assets/realmforge/animations/uppercut.json \
+            src/main/resources/assets/realmforge/models/item/slaughter_demon.json; do
+            [ -f "$f" ] && echo "found   $f" || echo "MISSING $f (this zip is not the Slaughter Demon update)"
           done
 
       - name: Check project has no external jars needed
