@@ -28,7 +28,7 @@ jobs:
           gradle-version: 8.14.3
 
       # Picks the zip in the repo root that was committed most recently.
-      # If several zips share the same commit time, the alphabetically last name wins.
+      # If several zips share the same commit time, the one with the newest name (alphabetically last) wins.
       - name: Find newest zip
         id: zip
         shell: bash
@@ -66,7 +66,7 @@ jobs:
           fi
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
 
-      # No Photon / LDLib2 / GeckoLib / extra jars needed: everything comes from NeoForge via build.gradle.
+      # No Photon / LDLib2 / extra jars needed: everything comes from NeoForge via build.gradle.
       # Small NeoForge 1.21.1 API fixes (safe to re-run).
       - name: Patch source fixes
         working-directory: ${{ steps.project.outputs.dir }}
@@ -86,13 +86,13 @@ jobs:
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          # Informational only: confirms the Skills system files are in this build.
+          # Informational only: confirms the Skills + Quest Board files made it into this build.
           for f in \
             src/main/java/com/realmforge/addon/logic/SkillManager.java \
-            src/main/java/com/realmforge/addon/client/SkillScreen.java \
+            src/main/java/com/realmforge/addon/quest/QuestManager.java \
             src/main/resources/assets/realmforge/skills/player/uppercut.json \
-            src/main/resources/assets/realmforge/skills/geo/heavypunch.geo.json; do
-            [ -f "$f" ] && echo "found   $f" || echo "MISSING $f (this zip is not the Skills update)"
+            src/main/resources/assets/realmforge/skills/geo/quest_board.geo.json; do
+            [ -f "$f" ] && echo "found   $f" || echo "MISSING $f (this zip is not the Quest Board update)"
           done
 
       - name: Check project has no external jars needed
