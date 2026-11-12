@@ -86,13 +86,13 @@ jobs:
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          # Informational only: confirms the Skills + Quest Board files made it into this build.
+          # Informational only: confirms the Books + VFX mobs files made it into this build.
           for f in \
             src/main/java/com/realmforge/addon/logic/SkillManager.java \
-            src/main/java/com/realmforge/addon/quest/QuestManager.java \
-            src/main/resources/assets/realmforge/skills/player/uppercut.json \
+            src/main/java/com/realmforge/addon/client/AddonBooks.java \
+            src/main/java/com/realmforge/addon/entity/VfxEntities.java \
             src/main/resources/assets/realmforge/skills/geo/quest_board.geo.json; do
-            [ -f "$f" ] && echo "found   $f" || echo "MISSING $f (this zip is not the Quest Board update)"
+            [ -f "$f" ] && echo "found   $f" || echo "MISSING $f (this zip is not the Books update)"
           done
 
       - name: Check project has no external jars needed
